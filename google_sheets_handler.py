@@ -6,6 +6,7 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 import io
+from supabase_client import upload_image_to_supabase
 
 # スプレッドシートの設定
 SPREADSHEET_ID = '1r9gAZZlWw40bURXOE2-BJB9OAZPEoPuN8-GZ7iD0yBA'  # あなたのスプレッドシートID
@@ -43,68 +44,18 @@ def get_drive_service():
     return service
 
 def upload_image_to_drive(image_path: str, filename: str) -> str:
-    """画像をGoogle DriveにアップロードしてファイルIDを返す"""
-    try:
-        drive_service = get_drive_service()
-        
-        # 画像ファイルを読み込み
-        with open(image_path, 'rb') as f:
-            image_data = f.read()
-        
-        # メタデータを設定
-        file_metadata = {
-            'name': filename,
-            'parents': []  # ルートフォルダに保存
-        }
-        
-        # メディアを設定
-        media = MediaIoBaseUpload(
-            io.BytesIO(image_data),
-            mimetype='image/jpeg',
-            resumable=True
-        )
-        
-        # ファイルをアップロード
-        file = drive_service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields='id'
-        ).execute()
-        
-        file_id = file.get('id')
-        
-        # ファイルを公開アクセス可能にする
-        try:
-            permission = {
-                'type': 'anyone',
-                'role': 'reader'
-            }
-            drive_service.permissions().create(
-                fileId=file_id,
-                body=permission,
-                fields='id'
-            ).execute()
-        except Exception as perm_error:
-            print(f"ファイル公開設定エラー: {perm_error}")
-            print("ファイル公開設定に失敗しましたが、アップロードは完了しました")
-        
-        print(f"画像をGoogle Driveにアップロードしました: {file_id}")
-        return file_id
-        
-    except Exception as e:
-        print(f"画像アップロードエラー: {e}")
-        print("画像アップロードに失敗しましたが、システムは継続して動作します")
-        return ""
+    """
+    画像をSupabase StorageにアップロードしてパブリックURLを返す
+    """
+    return upload_image_to_supabase(image_path, filename)
 
-def insert_image_to_sheet(sheet, sheet_name: str, row_number: int, image_file_id: str):
-    """スプレッドシートに画像を挿入（IMAGE関数を使用・正方形セル用）"""
+def insert_image_to_sheet(sheet, sheet_name: str, row_number: int, image_url: str):
+    """
+    スプレッドシートに画像を挿入（IMAGE関数を使用・正方形セル用）
+    """
     try:
-        # Google Driveの画像URLを作成
-        image_url = f"https://drive.google.com/uc?id={image_file_id}"
-        
         # IMAGE関数を使用して画像を表示（アスペクト比保持・セル内中央）
         image_formula = f'=IMAGE("{image_url}", 1)'
-        
         body = {'values': [[image_formula]]}
         sheet.values().update(
             spreadsheetId=SPREADSHEET_ID,
@@ -112,10 +63,8 @@ def insert_image_to_sheet(sheet, sheet_name: str, row_number: int, image_file_id
             valueInputOption='USER_ENTERED',
             body=body
         ).execute()
-        
         print(f"行 {row_number} に画像を挿入しました")
         return True
-        
     except Exception as e:
         print(f"画像挿入エラー: {e}")
         return False
@@ -613,12 +562,12 @@ def append_row_to_sheet(sheet, image_paths: List[str], product_info: Dict[str, s
         # 登録日を取得（販売日と同じ形式で統一）
         registration_date = datetime.now().strftime('%Y/%m/%d')
         
-        # 1枚目の画像をGoogle Driveにアップロード
-        image_file_id = ""
+        # 1枚目の画像をSupabase Storageにアップロード
+        image_url = ""
         if image_paths:
             try:
                 filename = f"product_{management_number}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
-                image_file_id = upload_image_to_drive(image_paths[0], filename)
+                image_url = upload_image_to_drive(image_paths[0], filename)
             except Exception as img_error:
                 print(f"画像アップロードエラー: {img_error}")
                 print("画像アップロードに失敗しましたが、商品データの保存は継続します")
@@ -660,9 +609,9 @@ def append_row_to_sheet(sheet, image_paths: List[str], product_info: Dict[str, s
             print("利益計算式の設定に失敗しましたが、商品データの保存は完了しました")
         
         # 画像を挿入（エラーが発生しても継続）
-        if image_file_id:
+        if image_url:
             try:
-                insert_image_to_sheet(sheet, sheet_name, row_number, image_file_id)
+                insert_image_to_sheet(sheet, sheet_name, row_number, image_url)
             except Exception as insert_error:
                 print(f"画像挿入エラー: {insert_error}")
                 print("画像挿入に失敗しましたが、商品データの保存は完了しました")
